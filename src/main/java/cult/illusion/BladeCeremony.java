@@ -1,9 +1,6 @@
 package cult.illusion;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.client.gui.screens.inventory.AnvilScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
 
@@ -106,23 +103,6 @@ public final class BladeCeremony {
     }
 
     // ---------------------------------------------------------------- запуск
-
-    /** Нажатие клавиши церемонии: запускает очередную стадию у инициатора и отправляет метку другим игрокам. */
-    public static void requestStart(Minecraft mc) {
-        if (mc.player == null || mc.level == null || mc.player.isDeadOrDying()) {
-            return;
-        }
-        UUID self = mc.player.getUUID();
-        if (ACTIVE.containsKey(self)) {
-            return; // своя стадия ещё идёт: нажатие игнорируется
-        }
-        int stage = nextStage + 1;
-        nextStage = (nextStage + 1) % STAGE_COUNT; // после третьей стадии последовательность начинается заново
-        int seed = Fx.RANDOM.nextInt(1 << 16);
-        long launchId = Fx.RANDOM.nextInt() & 0xFFFFFFFFL;
-        begin(mc, self, stage, seed, true);
-        CultIllusionClient.sendCeremonyMarker(mc, stage, seed, launchId);
-    }
 
     /** Метка от другого игрока (он уже проверен: рядом, в радиусе 32 блоков). */
     public static void receive(Minecraft mc, Player sender, int stage, int seed, long launchId) {
@@ -269,28 +249,6 @@ public final class BladeCeremony {
             }
             out.add(new RitualScreenFx.Source(rgb, level * inside, flash * inside, run.stage == 1 ? 0x30104F : 0xD8C4FF));
         }
-    }
-
-    // ---------------------------------------------------------------- клавиша при открытой наковальне
-
-    /**
-     * Вызывается из KeyboardHandlerMixin до обработки клавиши экраном. Пока открыт интерфейс наковальни, клавиша
-     * церемонии запускает стадию и не доходит до поля названия предмета (иначе в имя попал бы символ клавиши).
-     * Возвращает true, если нажатие обработано и дальше передавать его не нужно.
-     */
-    public static boolean onScreenKey(int action, KeyEvent event, KeyMapping key) {
-        Minecraft mc = Minecraft.getInstance();
-        if (key == null || key.isUnbound() || !(ScreenAccess.current(mc) instanceof AnvilScreen) || !key.matches(event)) {
-            return false;
-        }
-        if (action == 1) { // GLFW_PRESS
-            requestStart(mc);
-        }
-        if (action == 1 || action == 2) { // нажатие и автоповтор: символ клавиши в поле названия не попадает
-            swallowChar = true;
-            return true;
-        }
-        return false;
     }
 
     /** Помечает ближайший ввод символа как относящийся к клавише церемонии или ритуала (он будет отброшен). */

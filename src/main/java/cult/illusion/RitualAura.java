@@ -1,9 +1,6 @@
 package cult.illusion;
 
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.inventory.AnvilScreen;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.player.Player;
 
@@ -166,26 +163,6 @@ public final class RitualAura {
         ACTIVE_RITUALS.clear();
         LAST_SESSION.clear();
         boundLevel = null;
-    }
-
-    // ---------------------------------------------------------------- запуск и завершение
-
-    /** Нажатие K: запускает ритуал, а если он активен, запускает завершение. Во время переходов игнорируется. */
-    public static void requestToggle(Minecraft mc) {
-        if (mc.player == null || mc.level == null || mc.player.isDeadOrDying()) {
-            return;
-        }
-        UUID self = mc.player.getUUID();
-        Ritual current = ACTIVE_RITUALS.get(self);
-        if (current == null) {
-            int seed = Fx.RANDOM.nextInt(1 << 16);
-            long session = Fx.RANDOM.nextInt() & 0xFFFFFFFFL;
-            begin(mc, self, session, seed, true);
-            CultIllusionClient.sendRitualMarker(mc, true, seed, session);
-        } else if (current.state == ACTIVE) {
-            current.beginEnd();
-            CultIllusionClient.sendRitualMarker(mc, false, current.seed, current.session);
-        }
     }
 
     /** Метка начала от другого игрока (он уже проверен: рядом, в радиусе 32 блоков). */
@@ -358,23 +335,5 @@ public final class RitualAura {
             }
             out.add(new RitualScreenFx.Source(0x1A0536, 0.55 * inside * phase, flash * inside, 0xB58CFF));
         }
-    }
-
-    // ---------------------------------------------------------------- клавиша при открытой наковальне
-
-    /** Как BladeCeremony.onScreenKey: K перехватывается до поля названия, символ в имя предмета не попадает. */
-    public static boolean onScreenKey(int action, KeyEvent event, KeyMapping key) {
-        Minecraft mc = Minecraft.getInstance();
-        if (key == null || key.isUnbound() || !(ScreenAccess.current(mc) instanceof AnvilScreen) || !key.matches(event)) {
-            return false;
-        }
-        if (action == 1) {
-            requestToggle(mc);
-        }
-        if (action == 1 || action == 2) {
-            BladeCeremony.swallowNextChar();
-            return true;
-        }
-        return false;
     }
 }
