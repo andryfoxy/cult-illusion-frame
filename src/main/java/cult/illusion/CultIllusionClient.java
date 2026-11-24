@@ -21,10 +21,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.UUID;
 
 public class CultIllusionClient implements ClientModInitializer {
     private static final String MOD_ID = "cult_illusion";
+    private static final Logger LOG = LoggerFactory.getLogger(MOD_ID);
 
     // Имена как в ресурспаке (assets/minecraft/items/netherite_sword.json)
     private static final String NAME_KORU = "K\u014Dru y\u014Dna samu-sa"; // Kōru yōna samu-sa: Власть Божья
@@ -87,6 +91,12 @@ public class CultIllusionClient implements ClientModInitializer {
     private static final int TARGET_BITS = 32;
     private static final int PAYLOAD_BITS = SEED_BITS + TARGET_BITS;
 
+    // Тип сигнала (1..10, нумерация как в findMarker) в формате cult_mod передаётся 4 битами нулевой ширины сразу перед seed.
+    // Причина: чат-плагины сервера сводят серию неразрывных пробелов к одному обычному пробелу, и тип по длине серии терялся.
+    // Биты нулевой ширины серверы пока не трогали. Прежняя метка из неразрывных пробелов по-прежнему принимается (findMarker).
+    private static final int TYPE_BITS = 4;
+    private static final int TYPE_MAX = 10;
+
     private static KeyMapping menuKey;    // главное меню: проявления (Observer не запускает способности и события)
 
     @Override
@@ -116,9 +126,11 @@ public class CultIllusionClient implements ClientModInitializer {
         // Метка активации от другого игрока в обычном чате: скрыть строку и запустить способность у себя
         ClientReceiveMessageEvents.ALLOW_CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> {
             String text = message.getString();
-            int[] marker = findMarker(text);
+            logSignal("chat", text);
+            int[] marker = findSignal(text);
             if (marker == null) {
-                return true;
+                // Сервер мог вырезать невидимые символы сигнала: остаток `cult_mod "..."` всё равно служебный и скрывается
+                return !text.contains(SIGNAL_PREFIX);
             }
             onMarkerReceived(marker[0], sender == null ? null : sender.id(), null, decodePayload(text, marker[2]));
             return false;
@@ -127,9 +139,11 @@ public class CultIllusionClient implements ClientModInitializer {
         // Метка в сообщении, которое сервер (чат-плагин) отправил как системное: ник ищем в тексте перед меткой
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             String text = message.getString();
-            int[] marker = findMarker(text);
+            logSignal("game", text);
+            int[] marker = findSignal(text);
             if (marker == null) {
-                return true;
+                // Сервер мог вырезать невидимые символы сигнала: остаток `cult_mod "..."` всё равно служебный и скрывается
+                return !text.contains(SIGNAL_PREFIX);
             }
             onMarkerReceived(marker[0], null, stripTag(text.substring(0, marker[1])), decodePayload(text, marker[2]));
             return false;
@@ -299,6 +313,29 @@ public class CultIllusionClient implements ClientModInitializer {
         return null;
     }
 
+    // Диагностика: что именно дошло до клиента в сообщении с cult_mod. Невидимые символы выводятся кодами с числом повторов
+    private static void logSignal(String channel, String text) {
+        if (!text.contains(MOD_TAG)) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            int j = i;
+            while (j < text.length() && text.charAt(j) == c) {
+                j++;
+            }
+            if (c > 32 && c < 127) {
+                sb.append(text, i, j);
+            } else {
+                sb.append(String.format("[U+%04X x%d]", (int) c, j - i));
+            }
+            i = j;
+        }
+        LOG.info("[signal] {}: {} | marker={}", channel, sb, findSignal(text) != null);
+    }
+
     // Служебное сообщение мода: новый формат `cult_mod "..."` или прежний, начинающийся с неразрывного пробела
     private static boolean isSignalText(String message) {
         return !message.isEmpty() && (message.startsWith(SIGNAL_PREFIX) || message.charAt(0) == NBSP);
@@ -307,6 +344,34 @@ public class CultIllusionClient implements ClientModInitializer {
     // Убирает идентификатор мода из текста перед меткой, чтобы поиск ника не зависел от него
     private static String stripTag(String prefix) {
         return prefix.endsWith(SIGNAL_PREFIX) ? prefix.substring(0, prefix.length() - SIGNAL_PREFIX.length()) : prefix;
+    }
+
+    // Новый формат: cult_mod "<4 бита типа><seed><цель>" (допускаются пробелы между кавычкой и битами, их мог вставить сервер).
+    // Иначе прежняя метка из неразрывных пробелов. Возвращает {тип, позиция метки, позиция данных} или null
+    private static int[] findSignal(String text) {
+        int tag = text.indexOf(SIGNAL_PREFIX);
+        if (tag >= 0) {
+            int pos = tag + SIGNAL_PREFIX.length();
+            while (pos < text.length() && (text.charAt(pos) == ' ' || text.charAt(pos) == NBSP)) {
+                pos++;
+            }
+            if (pos + TYPE_BITS <= text.length()) {
+                int type = 0;
+                boolean valid = true;
+                for (int i = 0; i < TYPE_BITS; i++) {
+                    char c = text.charAt(pos + i);
+                    if (c != BIT_ZERO && c != BIT_ONE) {
+                        valid = false;
+                        break;
+                    }
+                    type = (type << 1) | (c == BIT_ONE ? 1 : 0);
+                }
+                if (valid && type >= 1 && type <= TYPE_MAX) {
+                    return new int[]{type, tag, pos + TYPE_BITS};
+                }
+            }
+        }
+        return findMarker(text);
     }
 
     // Возвращает {тип, позиция} или null, если метки нет
